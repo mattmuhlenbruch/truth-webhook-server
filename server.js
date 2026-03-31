@@ -14,50 +14,56 @@ const posts = [];
 const MAX_POSTS = 100;
 
 // ─── KEYWORD DEFINITIONS ─────────────────────────────────────────────────────
-const KEYWORD_CATEGORIES = {
-  tariffs: {
-    label: 'Tariffs',
-    color: '#f0a040',
-    terms: ['tariff', 'tariffs', 'trade war', 'import tax', 'import duty', 'duties', 'customs', 'levy', 'protectionist', 'trade deal', 'trade agreement', 'trade deficit']
-  },
-  fed: {
-    label: 'Federal Reserve',
-    color: '#4d9fff',
-    terms: ['fed', 'federal reserve', 'powell', 'fomc', 'interest rate', 'rate hike', 'rate cut', 'basis points', 'bps', 'monetary policy', 'quantitative easing', 'qe', 'tightening', 'inflation target']
-  },
-  rates: {
-    label: 'Rates / Bonds',
-    color: '#3ecf8e',
-    terms: ['interest rate', 'rates', 'yield', 'bond', 'bonds', 'treasury', 'ten year', '10-year', '10 year', '2-year', 'two year', 'spread', 'inversion', 'inverted yield', 'debt ceiling']
-  },
-  markets: {
-    label: 'Markets',
-    color: '#bc7aff',
-    terms: ['nasdaq', 'ndx', 's&p', 'sp500', 'dow jones', 'dow', 'stocks', 'equity', 'equities', 'rally', 'selloff', 'sell-off', 'crash', 'correction', 'bear market', 'bull market', 'volatility', 'vix']
-  },
-  economy: {
-    label: 'Economy',
-    color: '#f06060',
-    terms: ['recession', 'gdp', 'inflation', 'cpi', 'pce', 'jobs report', 'unemployment', 'nonfarm', 'payrolls', 'economy', 'economic', 'growth', 'stagflation', 'deficit', 'debt']
-  },
-  china: {
-    label: 'China / Trade',
-    color: '#ff8c5a',
-    terms: ['china', 'chinese', 'beijing', 'xi jinping', 'xi', 'decoupling', 'supply chain', 'semiconductor', 'chips act', 'taiwan', 'trade war']
+// Each rule has a label, sentiment (positive/negative), and a list of match
+// patterns. A pattern is either a single string (substring match) or an array
+// of strings (ALL must appear anywhere in the text — AND logic).
+
+const KEYWORD_RULES = [
+  // ── POSITIVE ────────────────────────────────────────────────────────────────
+  { label: 'Ceasefire',         sentiment: 'positive', pattern: 'ceasefire' },
+  { label: 'War ending',        sentiment: 'positive', pattern: ['war', 'end'] },
+  { label: 'War ending',        sentiment: 'positive', pattern: ['war', 'ending'] },
+  { label: 'War over',          sentiment: 'positive', pattern: ['war', 'over'] },
+  { label: 'Deal reached',      sentiment: 'positive', pattern: ['deal', 'reach'] },
+  { label: 'Deal reached',      sentiment: 'positive', pattern: ['deal', 'reached'] },
+  { label: 'Tariffs removed',   sentiment: 'positive', pattern: 'removed tariffs' },
+  { label: 'Tariffs removed',   sentiment: 'positive', pattern: 'remove tariffs' },
+  { label: 'No tariffs',        sentiment: 'positive', pattern: 'no tariffs' },
+  { label: 'Tariffs ending',    sentiment: 'positive', pattern: 'end tariffs' },
+  { label: 'Hormuz open',       sentiment: 'positive', pattern: 'hormuz is open' },
+
+  // ── NEGATIVE ────────────────────────────────────────────────────────────────
+  { label: 'No ceasefire',      sentiment: 'negative', pattern: 'no ceasefire' },
+  { label: 'No deal',           sentiment: 'negative', pattern: ['no', 'deal'] },
+  { label: 'War continues',     sentiment: 'negative', pattern: ['war', 'will continue'] },
+  { label: 'More tariffs',      sentiment: 'negative', pattern: 'more tariffs' },
+  { label: 'Tariffs increasing', sentiment: 'negative', pattern: 'increase tariffs' },
+  { label: 'Tariffs increased',  sentiment: 'negative', pattern: 'increased tariffs' },
+];
+
+function matchesPattern(lower, pattern) {
+  if (Array.isArray(pattern)) {
+    return pattern.every(term => lower.includes(term.toLowerCase()));
   }
-};
+  return lower.includes(pattern.toLowerCase());
+}
 
 function parseKeywords(text) {
   const lower = text.toLowerCase();
   const found = [];
-  for (const [key, cat] of Object.entries(KEYWORD_CATEGORIES)) {
-    const matchedTerms = cat.terms.filter(term => lower.includes(term));
-    if (matchedTerms.length > 0) {
+  const seenLabels = new Set();
+
+  for (const rule of KEYWORD_RULES) {
+    if (matchesPattern(lower, rule.pattern)) {
+      // Deduplicate by label+sentiment
+      const key = rule.label + rule.sentiment;
+      if (seenLabels.has(key)) continue;
+      seenLabels.add(key);
       found.push({
-        category: key,
-        label: cat.label,
-        color: cat.color,
-        terms: [...new Set(matchedTerms)]
+        label: rule.label,
+        sentiment: rule.sentiment,
+        color: rule.sentiment === 'positive' ? '#3ecf8e' : '#f06060',
+        pattern: Array.isArray(rule.pattern) ? rule.pattern.join(' + ') : rule.pattern
       });
     }
   }
