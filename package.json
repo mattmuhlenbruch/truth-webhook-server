@@ -1,7 +1,6 @@
 {
   "name": "truth-webhook-server",
   "version": "1.0.0",
-  "description": "Webhook receiver for Truth Social posts with keyword parsing",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
