@@ -1,7 +1,12 @@
 const express = require('express');
 const app = express();
 
-app.use(require('cors')());
+app.use(require('cors')({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.options('*', require('cors')());
 app.use(express.json());
 
 // In-memory post store (last 100 posts)
