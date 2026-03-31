@@ -1,36 +1,20 @@
 // server.js — Truth Social Post Webhook Receiver
 // Run: node server.js
-// Requires: npm install express ws cors
+// Requires: npm install express cors
 
 const express = require('express');
-const { WebSocketServer } = require('ws');
 const cors = require('cors');
 const http = require('http');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
 
 app.use(cors());
 app.use(express.json());
 
-const clients = new Set();
-
-wss.on('connection', (ws) => {
-  clients.add(ws);
-  console.log(`[WS] Client connected. Total: ${clients.size}`);
-  ws.on('close', () => {
-    clients.delete(ws);
-    console.log(`[WS] Client disconnected. Total: ${clients.size}`);
-  });
-});
-
-function broadcast(data) {
-  const msg = JSON.stringify(data);
-  for (const client of clients) {
-    if (client.readyState === 1) client.send(msg);
-  }
-}
+// In-memory post store (last 100 posts)
+const posts = [];
+const MAX_POSTS = 100;
 
 // ─── KEYWORD DEFINITIONS ─────────────────────────────────────────────────────
 const KEYWORD_CATEGORIES = {
@@ -84,30 +68,12 @@ function parseKeywords(text) {
 }
 
 // ─── WEBHOOK ENDPOINT ────────────────────────────────────────────────────────
-// Expects the Truth Social webhook format:
-// {
-//   "event": "post.created",
-//   "data": {
-//     "id": "uuid",
-//     "content": "...",
-//     "link": "https://truthsocial.com/...",
-//     "published_at": "2025-11-20T12:00:00Z",
-//     "categories": [{ "name": "economy", "display_name": "Economy" }]
-//   },
-//   "timestamp": "2025-11-20T12:00:01Z"
-// }
 app.post('/webhook', (req, res) => {
   const ts = new Date().toISOString();
 
-  // ── Full payload debug log ──────────────────────────────────────────────────
   console.log('\n' + '-'.repeat(60));
   console.log(`[INCOMING] ${ts}`);
   console.log(`  IP      : ${req.ip || req.connection.remoteAddress}`);
-  console.log(`  Method  : ${req.method} ${req.path}`);
-  console.log('  Headers :');
-  ['content-type','user-agent','x-forwarded-for','host'].forEach(h => {
-    if (req.headers[h]) console.log(`    ${h}: ${req.headers[h]}`);
-  });
   console.log('  Body (raw):');
   console.log(JSON.stringify(req.body, null, 2).split('\n').map(l => '    ' + l).join('\n'));
   console.log('-'.repeat(60));
@@ -115,21 +81,16 @@ app.post('/webhook', (req, res) => {
   const event = req.body && req.body.event;
   const data  = req.body && req.body.data;
 
-  // ── Validation ──────────────────────────────────────────────────────────────
   if (!req.body || Object.keys(req.body).length === 0) {
-    console.log('  [ERROR] Empty or non-JSON body — missing Content-Type: application/json?');
     return res.status(400).json({ error: 'Empty body — set Content-Type: application/json' });
   }
   if (!data) {
-    console.log(`  [ERROR] Missing "data" key. Got: ${Object.keys(req.body).join(', ')}`);
     return res.status(400).json({ error: 'Missing "data" field', receivedKeys: Object.keys(req.body) });
   }
   if (!data.content) {
-    console.log(`  [ERROR] Missing data.content. data keys: ${Object.keys(data).join(', ')}`);
     return res.status(400).json({ error: 'Missing data.content', receivedDataKeys: Object.keys(data) });
   }
 
-  // ── Parse ───────────────────────────────────────────────────────────────────
   const content          = data.content;
   const postId           = data.id || String(Date.now());
   const link             = data.link || null;
@@ -144,37 +105,40 @@ app.post('/webhook', (req, res) => {
     link,
     published_at: publishedAt,
     source_categories: sourceCategories,
-    keywords
+    keywords,
+    received_at: ts
   };
 
-  // ── Parsed result log ───────────────────────────────────────────────────────
-  console.log('  [PARSED]');
-  console.log(`    event             : ${post.event}`);
-  console.log(`    id                : ${post.id}`);
-  console.log(`    published_at      : ${post.published_at}`);
-  console.log(`    link              : ${post.link || 'none'}`);
-  console.log(`    source_categories : ${sourceCategories.join(', ') || 'none'}`);
-  console.log(`    content           : ${content.slice(0,120)}${content.length > 120 ? '...' : ''}`);
-  console.log(`    keywords matched  : ${keywords.length ? keywords.map(k => k.label + ' (' + k.terms.join(', ') + ')').join(' | ') : 'none'}`);
-  console.log(`    ws clients        : ${clients.size}`);
+  console.log(`  [PARSED] keywords: ${keywords.length ? keywords.map(k => k.label).join(', ') : 'none'}`);
   console.log('-'.repeat(60) + '\n');
 
-  broadcast({ type: 'post', data: post });
+  // Store post (newest first, cap at MAX_POSTS)
+  posts.unshift(post);
+  if (posts.length > MAX_POSTS) posts.pop();
+
   res.json({ ok: true, id: post.id, keywordsFound: keywords.length, keywords: keywords.map(k => k.label) });
 });
 
-// Health check
-app.get('/health', (req, res) => res.json({ status: 'ok', clients: clients.size }));
+// ─── POLLING ENDPOINT ────────────────────────────────────────────────────────
+// Frontend polls this every 2 seconds
+// Pass ?since=ISO_TIMESTAMP to only get new posts
+app.get('/posts', (req, res) => {
+  const since = req.query.since ? new Date(req.query.since) : null;
+  const result = since
+    ? posts.filter(p => new Date(p.received_at) > since)
+    : posts;
+  res.json({ posts: result, count: result.length, total: posts.length });
+});
+
+// ─── HEALTH CHECK ────────────────────────────────────────────────────────────
+app.get('/health', (req, res) => res.json({ status: 'ok', totalPosts: posts.length }));
 
 // ─── START ───────────────────────────────────────────────────────────────────
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`\n  Truth Social Webhook Server`);
-  console.log(`  POST  http://localhost:${PORT}/webhook`);
-  console.log(`  WS    ws://localhost:${PORT}`);
-  console.log(`  Health http://localhost:${PORT}/health\n`);
-  console.log(`  Example curl:`);
-  console.log(`  curl -X POST http://localhost:${PORT}/webhook \\`);
-  console.log(`    -H "Content-Type: application/json" \\`);
-  console.log(`    -d '{"event":"post.created","data":{"id":"abc123","content":"The Fed must cut rates. Tariffs on China are working!","link":"https://truthsocial.com/post/1","published_at":"2026-03-30T10:00:00Z","categories":[{"name":"economy","display_name":"Economy"}]},"timestamp":"2026-03-30T10:00:01Z"}'\n`);
+  console.log(`\n  Truth Social Webhook Server (polling mode)`);
+  console.log(`  POST   /webhook  — receive posts`);
+  console.log(`  GET    /posts    — poll for new posts`);
+  console.log(`  GET    /health   — health check`);
+  console.log(`  Port   ${PORT}\n`);
 });
