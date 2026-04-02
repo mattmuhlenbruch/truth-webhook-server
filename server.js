@@ -304,6 +304,13 @@ app.get('/leaderboard', (req, res) => {
   res.json({ leaderboard: ranked });
 });
 
+// ─── CLEAR FEED ──────────────────────────────────────────────────────────────
+app.post('/clear', (req, res) => {
+  posts.length = 0;
+  console.log('[CLEAR] Feed cleared by client');
+  res.json({ ok: true, message: 'Feed cleared' });
+});
+
 // ─── HEALTH ──────────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', totalPosts: posts.length }));
 
